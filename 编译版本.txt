@@ -1,0 +1,1 @@
+.\.venv-build\Scripts\pyinstaller.exe --noconfirm  --clean --icon=.\static\XHS-Downloader.ico --add-data "static;static" --add-data "locale;locale" --collect-all fastmcp --collect-all rich --runtime-hook .\source\expansion\pyi_rth_beartype.py --name XHS-Downloader main.py
