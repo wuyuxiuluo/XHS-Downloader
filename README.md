@@ -76,7 +76,7 @@
 <h1>🥣 使用方法</h1>
 <p>如果仅需下载作品文件，建议选择 <b>程序运行</b> 或 <b>Docker 运行</b>；如果有其他需求，建议选择 <b>源码运行</b>！</p>
 <p>⚠️ Cookie 配置为非强制项；如遇功能异常，建议配置或更新 Cookie 后再次尝试！</p>
-<p>⚠️ 未设置 Cookie 时，视频作品只能下载低分辨率文件；建议配置 Cookie 以获取更高画质（无需登录账号）！</p>
+<p>⚠️ 视频作品下载现会优先尝试高清解析接口以获取更高画质；若接口不可用或解析失败，则回退到站内原始视频流。Cookie 仍为可选配置，遇到异常时建议更新后重试！</p>
 <h2>🖱 程序运行</h2>
 <p>⭐ Mac OS、Windows 10 及以上用户可前往 <a href="https://github.com/JoeanAmier/XHS-Downloader/releases/latest">Releases</a> 或者 <a href="https://github.com/JoeanAmier/XHS-Downloader/actions">Actions</a> 下载程序压缩包，解压后打开程序文件夹，双击运行 <code>main</code> 即可使用。</p>
 <p>⭐ 本项目包含自动构建可执行文件的 GitHub Actions，使用者可以随时使用 GitHub Actions 将最新源码构建为可执行文件！</p>
@@ -436,7 +436,7 @@ async def example():
 <tr>
 <td align="center">image_format</td>
 <td align="center">str</td>
-<td align="center">图文作品文件下载格式，支持：<code>AUTO</code>、<code>PNG</code>、<code>WEBP</code>、<code>JPEG</code>、<code>HEIC</code><br><strong>部分作品没有 <code>HEIC</code> 格式的文件，此时下载的文件可能为 <code>WEBP</code> 格式！</strong><br><strong>设置为 <code>AUTO</code> 时表示动态格式，实际格式取决于服务器响应数据！</strong></td>
+<td align="center">图文作品文件下载格式，支持：<code>AUTO</code>、<code>PNG</code>、<code>WEBP</code>、<code>JPEG</code>、<code>HEIC</code><br><strong>部分作品没有 <code>HEIC</code> 格式的文件，此时下载的文件可能为 <code>WEBP</code> 格式！</strong><br><strong>设置为 <code>AUTO</code> 时，会按 <code>PNG</code> → <code>HEIC</code> → <code>JPEG</code> 的顺序优先尝试；若均不可用，则回退为服务器响应的动态格式。</strong></td>
 <td align="center">JPEG</td>
 </tr>
 <tr>
@@ -460,7 +460,7 @@ async def example():
 <tr>
 <td align="center">video_preference</td>
 <td align="center">str</td>
-<td align="center">视频作品文件下载偏好；含义：<code>resolution</code>：分辨率优先；<code>bitrate</code>：码率优先；<code>size</code>：文件大小优先</td>
+<td align="center">视频作品文件下载偏好；当高清解析接口不可用并回退到站内原始视频流时生效；含义：<code>resolution</code>：分辨率优先；<code>bitrate</code>：码率优先；<code>size</code>：文件大小优先</td>
 <td align="center">resolution</td>
 </tr>
 <tr>

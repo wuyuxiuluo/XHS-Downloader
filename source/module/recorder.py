@@ -55,7 +55,7 @@ class IDRecorder:
     async def all(self):
         if self.switch:
             await self.cursor.execute("SELECT ID FROM explore_id")
-            return [i[0] for i in await self.cursor.fetchmany()]
+            return [i[0] for i in await self.cursor.fetchall()]
 
     async def __aenter__(self):
         self.compatible()
@@ -63,9 +63,17 @@ class IDRecorder:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        with suppress(CancelledError):
-            await self.cursor.close()
-        await self.database.close()
+        if self.cursor:
+            with suppress(
+                CancelledError,
+                ValueError,
+            ):
+                await self.cursor.close()
+            self.cursor = None
+        if self.database:
+            with suppress(ValueError):
+                await self.database.close()
+            self.database = None
 
     def compatible(
         self,
@@ -188,4 +196,4 @@ class MapRecorder(IDRecorder):
     async def all(self):
         if self.switch:
             await self.cursor.execute("SELECT ID, NAME FROM mapping_data")
-            return [i[0] for i in await self.cursor.fetchmany()]
+            return [i[0] for i in await self.cursor.fetchall()]

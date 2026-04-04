@@ -28,6 +28,11 @@ __all__ = ["Download"]
 
 
 class Download:
+    AUTO_IMAGE_FORMAT_PRIORITY = (
+        "png",
+        "heic",
+        "jpeg",
+    )
     SEMAPHORE = Semaphore(MAX_WORKERS)
     CONTENT_TYPE_MAP = {
         "image/png": "png",
@@ -109,7 +114,7 @@ class Download:
             for url, name, format_ in tasks
         ]
         tasks = await gather(*tasks)
-        return path, tasks  # 未解之谜
+        return path, tasks
 
     def __generate_path(self, nickname: str, filename: str):
         if self.author_archive:
@@ -203,52 +208,101 @@ class Download:
         mtime: int,
     ):
         async with self.SEMAPHORE:
-            headers = self.headers.copy()
-            temp = self.temp.joinpath(f"{name}.{format_}")
-            self.__update_headers_range(
-                headers,
-                temp,
-            )
-            try:
-                async with self.client.stream(
-                    "GET",
+            if format_ == "auto":
+                return await self.__download_auto_image(
                     url,
-                    headers=headers,
-                ) as response:
-                    # await sleep_time()
-                    if response.status_code == 416:
-                        raise CacheError(
-                            _("文件 {0} 缓存异常，重新下载").format(temp.name),
-                        )
-                    response.raise_for_status()
-                    # self.__create_progress(
-                    #     bar,
-                    #     int(
-                    #         response.headers.get(
-                    #             'content-length', 0)) or None,
-                    # )
-                    async with open(temp, "ab") as f:
-                        async for chunk in response.aiter_bytes(self.chunk):
-                            await f.write(chunk)
-                            # self.__update_progress(bar, len(chunk))
-                real = await self.__suffix_with_file(
-                    temp,
                     path,
                     name,
-                    # suffix,
-                    format_,
-                )
-                self.manager.move(
-                    temp,
-                    real,
                     mtime,
-                    self.write_mtime,
                 )
-                # self.__create_progress(bar, None)
-                logging(self.print, _("文件 {0} 下载成功").format(real.name))
+            return await self.__download_single(
+                url,
+                path,
+                name,
+                format_,
+                mtime,
+            )
+
+    async def __download_auto_image(
+        self,
+        url: str,
+        path: Path,
+        name: str,
+        mtime: int,
+    ) -> bool:
+        candidates = self.__build_auto_image_candidates(url)
+        for i, (candidate_url, suffix, accepted_suffixes) in enumerate(
+            candidates,
+            start=1,
+        ):
+            if await self.__download_single(
+                candidate_url,
+                path,
+                name,
+                suffix,
+                mtime,
+                accepted_suffixes=accepted_suffixes,
+                cleanup_on_failure=True,
+                log_error=i == len(candidates),
+            ):
                 return True
-            except HTTPError as error:
-                # self.__create_progress(bar, None)
+        return False
+
+    async def __download_single(
+        self,
+        url: str,
+        path: Path,
+        name: str,
+        format_: str,
+        mtime: int,
+        accepted_suffixes: set[str] | None = None,
+        cleanup_on_failure: bool = False,
+        log_error: bool = True,
+    ) -> bool:
+        headers = self.headers.copy()
+        temp = self.temp.joinpath(f"{name}.{format_}")
+        self.__update_headers_range(
+            headers,
+            temp,
+        )
+        try:
+            async with self.client.stream(
+                "GET",
+                url,
+                headers=headers,
+            ) as response:
+                # await sleep_time()
+                if response.status_code == 416:
+                    raise CacheError(
+                        _("文件 {0} 缓存异常，重新下载").format(temp.name),
+                    )
+                response.raise_for_status()
+                async with open(temp, "ab") as f:
+                    async for chunk in response.aiter_bytes(self.chunk):
+                        await f.write(chunk)
+            real = await self.__suffix_with_file(
+                temp,
+                path,
+                name,
+                format_,
+                accepted_suffixes,
+            )
+            if not real:
+                if cleanup_on_failure:
+                    self.manager.delete(temp)
+                return False
+            self.manager.move(
+                temp,
+                real,
+                mtime,
+                self.write_mtime,
+            )
+            logging(self.print, _("文件 {0} 下载成功").format(real.name))
+            return True
+        except HTTPError as error:
+            if cleanup_on_failure:
+                self.manager.delete(temp)
+            if log_error:
                 logging(
                     self.print,
                     _("网络异常，{0} 下载失败，错误信息: {1}").format(
@@ -256,15 +310,16 @@ class Download:
                     ),
                     ERROR,
                 )
-                return False
-            except CacheError as error:
-                self.manager.delete(temp)
+            return False
+        except CacheError as error:
+            self.manager.delete(temp)
+            if log_error:
                 logging(
                     self.print,
                     str(error),
                     ERROR,
                 )
-                return False
+            return False
 
     @staticmethod
     def __create_progress(
@@ -290,7 +345,6 @@ class Download:
         headers: dict[str, str],
         suffix: str,
     ) -> tuple[int, str]:
-        """未使用"""
         response = await self.client.head(
             url,
             headers=headers,
@@ -313,19 +367,36 @@ class Download:
         headers["Range"] = f"bytes={(p := self.__get_resume_byte_position(file))}-"
         return p
 
-    async def __suffix_with_file(
+    @classmethod
+    def __build_auto_image_candidates(
+        cls,
+        url: str,
+    ) -> list[tuple[str, str, set[str] | None]]:
+        if not (token := cls.__extract_image_token(url)):
+            return [(url, "auto", None)]
+        return [
+            (
+                f"https://ci.xiaohongshu.com/{token}?imageView2/format/{suffix}",
+                suffix,
+                {suffix},
+            )
+            for suffix in cls.AUTO_IMAGE_FORMAT_PRIORITY
+        ] + [(url, "auto", None)]
+
+    @staticmethod
+    def __extract_image_token(url: str) -> str:
+        return url.split("://", maxsplit=1)[-1].split("/", maxsplit=1)[-1].split("?")[0]
+
+    async def __detect_file_suffix(
         self,
         temp: Path,
-        path: Path,
-        name: str,
-        default_suffix: str,
-    ) -> Path:
+    ) -> str | None:
         try:
             async with open(temp, "rb") as f:
                 file_start = await f.read(FILE_SIGNATURES_LENGTH)
             for offset, signature, suffix in FILE_SIGNATURES:
                 if file_start[offset : offset + len(signature)] == signature:
-                    return path.joinpath(f"{name}.{suffix}")
+                    return suffix
         except Exception as error:
             logging(
                 self.print,
@@ -334,4 +405,27 @@ class Download:
                 ),
                 ERROR,
             )
-        return path.joinpath(f"{name}.{default_suffix}")
+        return None
+
+    @staticmethod
+    def __is_auto_image_match(
+        suffix: str | None,
+        accepted_suffixes: set[str] | None,
+    ) -> bool:
+        return not accepted_suffixes or suffix in accepted_suffixes
+
+    async def __suffix_with_file(
+        self,
+        temp: Path,
+        path: Path,
+        name: str,
+        default_suffix: str,
+        accepted_suffixes: set[str] | None = None,
+    ) -> Path | None:
+        suffix = await self.__detect_file_suffix(temp)
+        if not self.__is_auto_image_match(
+            suffix,
+            accepted_suffixes,
+        ):
+            return None
+        return path.joinpath(f"{name}.{suffix or default_suffix}")

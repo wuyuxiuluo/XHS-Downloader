@@ -42,10 +42,21 @@ Label.prompt {
     border: double $primary;
 }
 #record {
-    grid-size: 1 3;
+    grid-size: 1 4;
     width: 80vw;
-    height: 12;
+    height: 18;
     border: double $primary;
+}
+#payload {
+    height: 8;
+    margin: 0 1;
+}
+#record_hint {
+    padding: 0 1;
+    color: $primary;
+}
+Button#paste {
+    color: $accent;
 }
 ModalScreen {
     align: center middle;

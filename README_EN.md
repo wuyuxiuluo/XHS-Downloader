@@ -77,7 +77,7 @@
 <h1>🥣 Usage</h1>
 <p>If you only need to download notes files, it is recommended to choose <b>Program Run</b>; if you have other needs, it is recommended to choose <b>Source Code Run</b>!</p>
 <p>⚠️ Cookies are optional. If issues occur, please try configuring or updating them and retry!</p>
-<p>⚠️ When Cookie is not set, video works can only be downloaded in low resolution; it is recommended to configure Cookie to obtain higher quality (no need to log in to the account)!</p>
+<p>⚠️ Video downloads now try the HD parsing endpoint first to obtain higher-quality files; if that endpoint is unavailable or parsing fails, the program falls back to the original in-site video stream. Cookies are still optional, but updating them is recommended when issues occur.</p>
 <h2>🖱 Program Run</h2>
 <p>⭐ Mac OS, Windows 10 and above users can go to <a href="https://github.com/JoeanAmier/XHS-Downloader/releases/latest">Releases</a> or <a href="https://github.com/JoeanAmier/XHS-Downloader/actions">Actions</a> to download the program package, unzip it, open the program folder, and double-click to run <code>main</code> to use.</p>
 <p>⭐ This project includes GitHub Actions for automatic building executable files. Users can use GitHub Actions to build the latest source code into executable files at any time!</p>
@@ -440,7 +440,7 @@ async def example():
 <tr>
 <td align="center">image_format</td>
 <td align="center">str</td>
-<td align="center">Download format for image notes files, supported: <code>AUTO</code>、<code>PNG</code>、<code>WEBP</code>、<code>JPEG</code>、<code>HEIC</code><br><strong>Some notes do not have files in HEIC format, and the downloaded files may be in WEBP format</strong><br><strong>When set to<code>AUTO</code>, it represents dynamic format, and the actual format depends on the server's response data</strong></td>
+<td align="center">Download format for image notes files, supported: <code>AUTO</code>、<code>PNG</code>、<code>WEBP</code>、<code>JPEG</code>、<code>HEIC</code><br><strong>Some notes do not have files in HEIC format, and the downloaded files may be in WEBP format</strong><br><strong>When set to <code>AUTO</code>, the downloader will try <code>PNG</code> → <code>HEIC</code> → <code>JPEG</code> first; if none are available, it falls back to the server's dynamic response format.</strong></td>
 <td align="center">JPEG</td>
 </tr>
 <tr>
@@ -464,7 +464,7 @@ async def example():
 <tr>
 <td align="center">video_preference</td>
 <td align="center">str</td>
-<td align="center">Video notes file download preference; Meaning: <code>resolution</code>: resolution priority; <code>bitrate</code>: bitrate priority; <code>size</code>: file size priority</td>
+<td align="center">Video notes file download preference; this takes effect when the HD parsing endpoint is unavailable and the downloader falls back to the original in-site video stream; Meaning: <code>resolution</code>: resolution priority; <code>bitrate</code>: bitrate priority; <code>size</code>: file size priority</td>
 <td align="center">resolution</td>
 </tr>
 <tr>

@@ -177,7 +177,7 @@ class XHS:
         self.mapping = Mapping(self.manager, self.map_recorder)
         self.html = Html(self.manager)
         self.image = Image()
-        self.video = Video()
+        self.video = Video(self.manager)
         self.explore = Explore()
         self.convert = Converter()
         self.download = Download(self.manager)
@@ -197,14 +197,15 @@ class XHS:
             data, self.manager.image_format
         )
 
-    def __extract_video(
+    async def __extract_video(
         self,
         container: dict,
         data: Namespace,
     ):
-        container["下载地址"] = self.video.deal_video_link(
+        container["下载地址"] = await self.video.deal_video_link(
             data,
             self.manager.video_preference,
+            container.get("作品链接"),
         )
         container["动图地址"] = [
             None,
@@ -437,7 +438,7 @@ class XHS:
         count: SimpleNamespace,
     ):
         if data["作品类型"] == _("视频"):
-            self.__extract_video(data, namespace)
+            await self.__extract_video(data, namespace)
         elif data["作品类型"] in {
             _("图文"),
             _("图集"),
