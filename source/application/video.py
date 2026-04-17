@@ -1,16 +1,17 @@
 import base64
 import json
+import os
 import random
 import re
 import string
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from hashlib import md5
 from typing import TYPE_CHECKING, Any
 
-from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from source.expansion import Namespace
 
@@ -69,9 +70,9 @@ class Video:
     )
     HELLOTIK_BASE_URL = "https://www.hellotik.app"
     HELLOTIK_REFERER = f"{HELLOTIK_BASE_URL}/zh/rednote"
-    HELLOTIK_SECRET = "TI52hwg30V08ycUO9"
     HELLOTIK_AES_KEY = "93838338562359368888868323563256"
     HELLOTIK_XOR_KEY = 90
+    HELLOTIK_PARSE_VERSION = 1
     CUSTOM_B64 = "ZYXABCDEFGHIJKLMNOPQRSTUVWzyxabcdefghijklmnopqrstuvw9876543210-_"
     STANDARD_B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     SOURCE_PATTERNS = (
@@ -116,11 +117,11 @@ class Video:
         if not (normalized := self.build_source_url(data, source_url)):
             return None
         try:
-            params = self.build_parse_params(normalized)
-            payload, sign = self.generate_auth_payload(params)
+            gate = await self.fetch_gate_ticket(normalized)
+            payload = await self.generate_auth_payload(normalized, gate)
             response = await self.client.post(
                 f"{self.HELLOTIK_BASE_URL}/api/parse",
-                headers=self.hellotik_headers | {"X-Auth-Token": sign},
+                headers=self.hellotik_headers,
                 json=payload,
             )
             response.raise_for_status()
@@ -178,6 +179,7 @@ class Video:
             "successCount": "0",
             "totalSuccessCount": "0",
             "firstSuccessDate": cls.today_bj(),
+            "geoipIp": "",
         }
 
     @classmethod
@@ -199,52 +201,102 @@ class Video:
             return None
         return HelloTikParseResult(data).hd_url
 
-    @classmethod
-    def generate_auth_payload(
-        cls,
-        params: dict[str, Any],
-    ) -> tuple[dict[str, Any], str]:
-        timestamp = int(time.time())
-        client_salt = cls.random_salt(8)
-        sign = cls.generate_signature_with_md5(
+    async def fetch_gate_ticket(self, normalized_source: str) -> dict[str, Any]:
+        response = await self.client.post(
+            f"{self.HELLOTIK_BASE_URL}/api/gate-e5eea8",
+            headers=self.hellotik_headers,
+            json={
+                "requestURL": normalized_source,
+                "isBatch": False,
+                "mode": "single",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("success"):
+            raise RuntimeError(data.get("message") or data.get("error") or "Gate request failed")
+        ticket = data.get("tk_e5eea8")
+        seed = data.get("sd_e5eea8")
+        if not ticket or not seed:
+            raise RuntimeError("Gate response missing ticket or seed")
+        return {
+            "ticket": ticket,
+            "seed": seed,
+            "request_fields": {
+                "key": "tk_e5eea8",
+                "payload": "pl_e5eea8",
+                "iv": "iv_e5eea8",
+                "version": "vr_e5eea8",
+            },
+        }
+
+    async def generate_auth_payload(
+        self,
+        normalized_source: str,
+        gate: dict[str, Any],
+    ) -> dict[str, Any]:
+        params = self.build_parse_params(normalized_source)
+        try:
+            params["isoCode"] = await self.fetch_geo_value("isoCode") or params["isoCode"]
+            params["geoipIp"] = await self.fetch_geo_value("ip") or params["geoipIp"]
+            params["uwx_id"] = await self.fetch_uwx_id() or params["uwx_id"]
+        except Exception:
+            pass
+        encrypted = self.encrypt_parse_payload(
             params,
-            client_salt,
-            timestamp,
-            cls.HELLOTIK_SECRET,
+            parse_ticket=gate["ticket"],
+            enc_seed=gate["seed"],
         )
-        payload = dict(params)
-        payload["time"] = timestamp
-        payload["key"] = client_salt
-        return payload, sign
+        fields = gate["request_fields"]
+        return {
+            fields["key"]: encrypted["parseTicket"],
+            fields["payload"]: encrypted["payload"],
+            fields["iv"]: encrypted["iv"],
+            fields["version"]: encrypted["v"],
+        }
 
-    @classmethod
-    def generate_signature_with_md5(
-        cls,
-        params: dict[str, Any],
-        client_salt: str,
-        timestamp: int,
-        secret: str,
-    ) -> str:
-        sorted_keys = sorted(params)
-        base_string = "&".join(
-            f"{key}={cls.js_stringify(params[key])}" for key in sorted_keys
+    def encrypt_parse_payload(
+        self,
+        plain_payload: dict[str, Any],
+        *,
+        parse_ticket: str,
+        enc_seed: str,
+        version: int = HELLOTIK_PARSE_VERSION,
+    ) -> dict[str, Any]:
+        key_material = f"{parse_ticket}:{enc_seed}".encode("utf-8")
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(key_material)
+        key = digest.finalize()
+        iv = os.urandom(12)
+        plaintext = json.dumps(
+            plain_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        aesgcm = AESGCM(key)
+        ciphertext = aesgcm.encrypt(iv, plaintext, None)
+        return {
+            "parseTicket": parse_ticket,
+            "payload": base64.b64encode(ciphertext).decode("ascii"),
+            "iv": base64.b64encode(iv).decode("ascii"),
+            "v": version,
+        }
+
+    async def fetch_geo_value(self, key: str) -> str | None:
+        response = await self.client.get(
+            "https://user.hellotik.app/getip/geoip?minimal=1",
+            headers=self.hellotik_headers,
         )
-        to_hash = f"{base_string}&salt={client_salt}&ts={timestamp}&secret={secret}"
-        return cls.replace_bd(md5(to_hash.encode("utf-8")).hexdigest())
+        response.raise_for_status()
+        return response.json().get("data", {}).get(key)
 
-    @staticmethod
-    def replace_bd(value: str) -> str:
-        return value.replace("b", "#").replace("d", "F").replace("#", "C")
-
-    @staticmethod
-    def js_stringify(value: Any) -> str:
-        if value is None:
-            return "null"
-        if value is True:
-            return "true"
-        if value is False:
-            return "false"
-        return str(value)
+    async def fetch_uwx_id(self) -> str | None:
+        response = await self.client.post(
+            f"{self.HELLOTIK_BASE_URL}/account/user/api/uwx/generate-id",
+            headers=self.hellotik_headers,
+        )
+        response.raise_for_status()
+        return response.json().get("data", {}).get("uwx_id")
 
     @staticmethod
     def random_salt(length: int) -> str:
